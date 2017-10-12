@@ -1,0 +1,175 @@
+- hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: Getting default vpc id
+      shell: aws ec2 describe-vpcs | grep VpcId  | awk -F '"' '{print $4}' | head -n 1
+      register: vpc_id
+
+    - name: Getting Subnets
+      ec2_vpc_subnet_facts:
+        filters:
+          vpc-id: "{{vpc_id.stdout_lines.0}}"
+      register: subnet_facts
+
+    - set_fact:
+        subnet_ids: "{{subnet_facts.subnets|map(attribute='id')|list }}"
+
+    - name: Create subnet group for elasticache
+      elasticache_subnet_group:
+        state: present
+        name: EC-subnet-group
+        description: Elasticache subnet group
+        subnets:
+          - "{{ subnet_ids.0 }}"
+          - "{{ subnet_ids.1 }}"
+          - "{{ subnet_ids.2 }}"
+
+    - name: Create subnet group for RDS
+      rds_subnet_group: 
+        state: present
+        name: PG-subnet-group
+        description: Postgres subnet for airflow
+        subnets:
+          - "{{ subnet_ids.0 }}"
+          - "{{ subnet_ids.1 }}"
+          - "{{ subnet_ids.2 }}"
+
+    - name: Create Redis cluster
+      elasticache:
+        name: "redis-test"
+        state: present
+        engine: redis
+        node_type: cache.m1.small
+        num_nodes: 1
+      register: redis_output
+
+    - name: Create postgresql Security group
+      ec2_group:
+        name: postgresdb sec
+        description: Postgresql DB Sec Group
+        vpc_id: "{{vpc_id.stdout_lines.0}}"
+        region: us-west-2
+        rules:
+          - proto: tcp
+            from_port: 5432
+            to_port: 5432
+            cidr_ip: 172.20.0.0/16
+      register: sg_output
+
+    - name: Create Postgres database
+      rds:
+        command: create
+        instance_name: airflowdb
+        db_engine: postgres
+        size: 10
+        instance_type: db.t2.medium
+        username: airflow1
+        password: airflow1
+        security_groups: "{{sg_output.group_id}}"
+        multi_zone: true
+        tags:
+          Environment: testing
+          Application: airflow
+        wait: yes
+        wait_timeout: 300
+      register: postgres_output
+
+    - set_fact:
+        postgres_endpoint: "{{task_output.instance.endpoint}}"
+        redis_endpoint: "{{redis_output.elasticache.data.CacheNodes.0.Endpoint.Address}}"
+
+    - name: Cloning airflow docker code
+      git:
+        repo: git@github.com:xsamurai/airflow-example.git
+        accept_hostkey: true
+        dest: /root/example
+
+    - name: Creating airflow config
+      template:
+        src: /etc/ansible/templates/airflow.tmpl
+        dest: /root/example/dockerbuilds/airflow/files/airflow.cfg
+
+    - name: Pushing airflow repo to github
+      shell: /bin/push_git.sh
+
+    - name: Create ECS Cluster
+      ecs_cluster:
+        name: test-cluster
+        state: present
+
+    - name: Define ECS tasks
+      ecs_taskdefinition:
+        containers:
+        - name: airflow
+          cpu: 10
+          essential: true
+          image: "fahad0000/test:airflow"
+          memory: 300
+          portMappings:
+          - containerPort: 8080
+            hostPort: 8080
+        state: present
+        family: frontend
+      register: task_output
+   
+    - name: Create ECS Service
+      ecs_service:
+        state: present
+        name: test-service
+        cluster: test-cluster
+        task_definition: test-task-definition
+        desired_count: 3
+        deployment_configuration:
+        minimum_healthy_percent: 75
+        maximum_percent: 150 
+
+    - name: Debug info for task definitions
+      debug:
+        msg: "{{task_output}}"
+
+    - name: Run Airflow container(s)
+      ecs_task:
+        operation: run
+        cluster: test-cluster
+        task_definition: airflow
+        count: 1
+        started_by: ansible_user
+      register: task_output
+
+    - name: Debug Info for Airflow task start
+      debug:
+        msg: "{{task_output}}"
+   
+    - name: Creating alarm for scaling up airflow instances
+      ec2_metric_alarm:
+        state: present
+        region: us-west-2
+        name: "cpu-high"
+        metric: "CPUUtilization"
+        namespace: "AWS/ECS"
+        statistic: Average
+        comparison: ">="
+        threshold: 80.0
+        period: 300
+        evaluation_periods: 3
+        unit: "Percent"
+        description: "Cpu usage average is higher than 80% for 15 minutes "
+        dimensions: {'ECSCluster':'test-cluster'}
+        alarm_actions: ["ClusterScaleOutPolicy"]
+
+    - name: Creating alarm for scaling down airflow instances
+      ec2_metric_alarm:
+        state: present
+        region: ap-southeast-2
+        name: "cpu-low"
+        metric: "CPUUtilization"
+        namespace: "AWS/ECS"
+        statistic: Average
+        comparison: "<="
+        threshold: 5.0
+        period: 300
+        evaluation_periods: 3
+        unit: "Percent"
+        description: "This will alarm when a bamboo slave's cpu usage average is lower than 5% for 15 minutes "
+        dimensions: {'ECSCluster':'test-cluster'}
+        alarm_actions: ["ClusterScaleInPolicy"]
