@@ -4,7 +4,6 @@ This project is to demonstrate setting up of an automated ECS cluster running ai
 Ansible is used to automate tasks, Git to hold our repo code, Dockerhub to automate our
 container builds and AWS for hosting infrastructure.
 
-AWS resources used [VPC, ElasticCache, ECS, RDS, AutoScalingGroup, ELB]
 
 ## Getting Started
 
@@ -49,5 +48,15 @@ Unlock the encrypted files
 git crypt unlock /path/to/secret_file
 ```
 
+### AWS Resources used in this example
 
+VPC, ElasticCache, ECS, RDS, AutoScalingGroup, ELB.
+
+
+### Time constraint related choices
+
+
+1. I usually prefer to build my own containers unless they are an official release
+or I need something specific.  Due to lack of time I am using puckel/docker-airflow as
+my base image to build off of.
 
