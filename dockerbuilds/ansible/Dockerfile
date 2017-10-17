@@ -15,3 +15,6 @@ add files/ansible /etc/ansible
 add files/.ssh/id_rsa* /root/.ssh/
 
 ENV AWS_REGION="us-west-2"
+
+ENTRYPOINT ["/bin/runit.sh"]
+CMD []

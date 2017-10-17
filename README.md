@@ -29,13 +29,13 @@ You will also require git-crypt and the key file to read the encrypted files.
 To create the cluster, simply run 
 
 ```
-docker run -d -e AWS_SECRET_KEY_ID=TEST -e AWS_SECRET_ACCESS_KEY=TEST fahad0000/ansible:latest /bin/runit.sh up
+docker run -d -e AWS_ACCESS_KEY_ID=TEST -e AWS_SECRET_ACCESS_KEY=TEST fahad0000/ansible:latest /bin/runit.sh up
 ```
 
 ### Deleting the cluster
 
 ```
-docker run -d -e AWS_SECRET_KEY_ID=TEST -e AWS_SECRET_ACCESS_KEY=TEST fahad0000/ansible:latest /bin/runit.sh down
+docker run -d -e AWS_ACCESS_KEY_ID=TEST -e AWS_SECRET_ACCESS_KEY=TEST fahad0000/ansible:latest /bin/runit.sh down
 ```
 
 ### Reviewing the code
@@ -67,7 +67,7 @@ my base image to build off of.
 2. The configuration options for the ansible tasks are all static, it would be preferable
 to allow users to use custom values.
 
-3. There is no testing at all, this is critical to test not only the resources but also
-automate load test the environment as well.
+3. There is no testing at all after a resource is launched, should have baked in if an ec2 instance 
+or rds instance is functioning within acceptable norms.  
 
 4. Depending on the environment, custom VPC and Subnets should be created and cleaned up.

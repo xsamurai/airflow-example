@@ -4,8 +4,11 @@
     - block:
 
       - name: Getting default vpc id
-        shell: aws ec2 describe-vpcs | grep VpcId  | awk -F '"' '{print $4}' | tail -n 1
+        shell: aws ec2 describe-vpcs | grep VpcId  | awk -F '"' '{print $4}' | head -n 1
         register: vpc_id
+      
+      - debug:
+          var: "{{vpc_id}}"
 
       - name: Getting Subnets
         ec2_vpc_subnet_facts:
@@ -68,7 +71,7 @@
           instance_type: db.t2.medium
           username: airflow1
           password: airflow1
-          security_groups: "{{sg_output.group_id}}"
+          vpc_security_groups: "{{sg_output.group_id}}"
           multi_zone: true
           tags:
             Environment: testing
@@ -78,7 +81,7 @@
         register: postgres_output
 
       - set_fact:
-          postgres_endpoint: "{{task_output.instance.endpoint}}"
+          postgres_endpoint: "{{postgres_output.instance.endpoint}}"
           redis_endpoint: "{{redis_output.elasticache.data.CacheNodes.0.Endpoint.Address}}"
 
       - name: Cloning airflow docker code
@@ -144,6 +147,12 @@
       - debug:
           var: elb_output
 
+      - name: Creating ECS Role
+        iam_role:
+          name: ecsrole
+          assume_role_policy_document: "{{ lookup('file','ecs_role.json') }}"
+          state: present
+
       - name: Creating ECS Launch config
         ec2_lc:
           name: testlc
@@ -171,6 +180,52 @@
           load_balancers: ['elbtest']
         register: ec2_asg
 
+
+      - ec2_scaling_policy:
+          name: "ecs-scaledown-policy"
+          asg_name: testasg
+          state: present
+          adjustment_type: "ChangeInCapacity"
+          scaling_adjustment: -1
+          min_adjustment_step: 1
+          cooldown: 300
+        register: scale_down
+
+      - ec2_scaling_policy:
+          name: "ecs-scaleup-policy"
+          asg_name: testasg
+          state: present
+          adjustment_type: "ChangeInCapacity"
+          scaling_adjustment: +1
+          min_adjustment_step: 1
+          cooldown: 300
+        register: scale_up
+
+      - ec2_metric_alarm:
+          name: group-high-cpu-alarm
+          metric: "CPUUtilization"
+          statistic: Average
+          comparison: ">="
+          threshold: "85"
+          period: 300
+          evaluation_periods: 2
+          unit: "Percent"
+          description: "alerm when CPU utilization is >= 85% for 10 minutes."
+          dimensions: {"AutoScalingGroupName": 'testasg'}
+          alarm_actions: ["{{ scale_up.arn }}"]
+
+      - ec2_metric_alarm:
+          name: group-low-cpu-alarm
+          metric: "CPUUtilization"
+          statistic: Average
+          comparison: "<"
+          threshold: "50"
+          period: 300
+          evaluation_periods: 2
+          unit: "Percent"
+          description: "alerm when CPU utilization is < 50% for 10 minutes."
+          dimensions: {"AutoScalingGroupName": 'testasg'}
+          alarm_actions: ["{{ scale_down.arn }}"]
 
 
       - name: Define ECS tasks

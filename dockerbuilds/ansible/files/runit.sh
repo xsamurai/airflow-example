@@ -11,10 +11,12 @@ echo "[default]" > $CREDENTIALS
 echo `env | grep AWS_ACCESS_KEY_ID` >> $CREDENTIALS
 echo `env | grep AWS_SECRET_ACCESS_KEY` >> $CREDENTIALS
 
+
 #building config file
 echo "[default]" > $CONFIG
 echo "region = us-west-2" >> $CONFIG 
 echo "output = json" >> $CONFIG 
+
 
 #running ansible
 if [[ $1 == "up" ]]; then
