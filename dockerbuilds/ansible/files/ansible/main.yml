@@ -19,6 +19,12 @@
       - set_fact:
           subnet_ids: "{{subnet_facts.subnets|map(attribute='id')|list }}"
           vpc_id: "{{vpc_id.stdout_lines.0}}"
+      
+      - name: Creating key pair
+        ec2_key:
+          name: airflow
+          key_material: 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDBOZK72fJ3D7yM/MwdPuxhAnivD+Jnu9wUd0tAUA6kRxGqmOpWhKKm0bX7JP4/W3/gHU1LNWI5i/zS+UhoxAYhO/gG1+wSrtW5droLhIFNRDzjcAnWB4Kw4YLG86pWar790w2qdSKvCK9Rs2b0J2fM6JhcOr6uU+8wUlE5sWMQuMnzcrEDOr3MqQFh/7jPg5bSEJ/hdQxIBd+n2cqx/qnvLheoLv/gcnC9tW0emOh6m3ptECcSM64nGtprbyVtZLmR9gXWe3pOLRI9zaSFt9JCJDVVoffxzKX60NrWZpCTAHGU8Sqym01ohofXdC5P58VI5mITXcVNoD60T6U2UvlX'
+          state: present
 
       - name: Create subnet group for elasticache
         elasticache_subnet_group:
@@ -59,7 +65,7 @@
             - proto: tcp
               from_port: 5432
               to_port: 5432
-              cidr_ip: 172.20.0.0/16
+              cidr_ip: 172.31.0.0/16
         register: sg_output
 
       - name: Create Postgres database
@@ -101,7 +107,7 @@
 
       - name: Create ECS Cluster
         ecs_cluster:
-          name: test-cluster
+          name: default
           state: present
 
       - name: Creating ECS Security group
@@ -137,7 +143,7 @@
               proxy_protocol: True
           health_check:
             ping_protocol: tcp # options are http, https, ssl, tcp
-            ping_port: 22
+            ping_port: 8080
             response_timeout: 5 # seconds
             interval: 30 # seconds
             unhealthy_threshold: 2
@@ -147,21 +153,16 @@
       - debug:
           var: elb_output
 
-      - name: Creating ECS Role
-        iam_role:
-          name: ecsrole
-          assume_role_policy_document: "{{ lookup('file','ecs_role.json') }}"
-          state: present
-
       - name: Creating ECS Launch config
         ec2_lc:
           name: testlc
           state: present
           image_id: ami-29f80351
           security_groups: "{{ sg_output.group_id}}"
+          key_name: airflow
           instance_type: t2.micro
           instance_monitoring: yes
-          instance_profile_name: "ecsInstanceRole"
+          instance_profile_name: "arn:aws:iam::524458042105:instance-profile/ryan-test-ecs-bare-EC2InstanceProfile-FFLCDHSY157L"
         register: ec2_lc
 
       - name: Creating ECS AutoScaling Group
@@ -169,7 +170,7 @@
           name: testasg
           launch_config_name: testlc
           health_check_period: 60
-          health_check_type: ELB
+          health_check_type: EC2
           replace_all_instances: yes
           availability_zones: ['us-west-2a', 'us-west-2b', 'us-west-2c']
           min_size: 2
@@ -234,7 +235,7 @@
           - name: airflow
             cpu: 10
             essential: true
-            image: "fahad0000/airflow:latest"
+            image: "fahad0000/airflow-example:latest"
             memory: 300
             portMappings:
             - containerPort: 8080
@@ -247,7 +248,7 @@
         ecs_service:
           state: present
           name: test-service
-          cluster: test-cluster
+          cluster: default
           task_definition: airflow
           desired_count: 3
           deployment_configuration:
@@ -261,7 +262,7 @@
       - name: Run Airflow container(s)
         ecs_task:
           operation: run
-          cluster: test-cluster
+          cluster: default
           task_definition: airflow
           count: 1
           started_by: ansible_user
@@ -298,7 +299,7 @@
         ecs_service:
           name: test-service
           state: present
-          cluster: test-cluster
+          cluster: default
           task_definition: airflow
           desired_count: 0
 
@@ -306,11 +307,11 @@
         ecs_service:
           name: test-service
           state: absent
-          cluster: test-cluster
+          cluster: default
 
       - name: Deleting ECS Cluster
         ecs_cluster:
-          name: test-cluster
+          name: default
           state: absent
       
       - name: Deleting ELB
